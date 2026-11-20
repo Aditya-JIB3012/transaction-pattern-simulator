@@ -369,8 +369,118 @@ def milestone_3(
 
 # --- Milestone 4: Evaluate the generated sequences for similarity to real patterns.
 # Hint: Compare the frequent patterns discovered in real data with those in generated sequences.
-def milestone_4():  # TODO(milestone 4)
-    raise NotImplementedError("TODO(milestone 4)")
+
+def evaluate_sequence_similarity(
+    real_sequences: List[List[str]],
+    generated_sequences: List[List[str]],
+    min_support: float = 0.05,
+    max_size: int = 4,
+) -> Dict[str, Any]:
+    """Quantitatively compare frequent patterns and event distributions between real and generated sequences."""
+    real_patterns = frequent_itemsets(real_sequences, min_support=min_support, max_size=max_size)
+    gen_patterns = frequent_itemsets(generated_sequences, min_support=min_support, max_size=max_size)
+
+    real_keys = set(real_patterns.keys())
+    gen_keys = set(gen_patterns.keys())
+
+    intersection = real_keys & gen_keys
+    union = real_keys | gen_keys
+
+    # Quantitative Pattern Metrics
+    jaccard = len(intersection) / len(union) if union else 1.0
+    recall = len(intersection) / len(real_keys) if real_keys else 1.0
+    precision = len(intersection) / len(gen_keys) if gen_keys else 1.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    # Support Error on shared patterns
+    if intersection:
+        support_diffs = [abs(real_patterns[k] - gen_patterns[k]) for k in intersection]
+        mae_support = float(np.mean(support_diffs))
+        
+        real_vals = np.array([real_patterns[k] for k in intersection])
+        gen_vals = np.array([gen_patterns[k] for k in intersection])
+        if len(intersection) > 1 and np.std(real_vals) > 1e-6 and np.std(gen_vals) > 1e-6:
+            support_correlation = float(np.corrcoef(real_vals, gen_vals)[0, 1])
+        else:
+            support_correlation = 1.0 if mae_support < 0.05 else 0.5
+    else:
+        mae_support = 1.0
+        support_correlation = 0.0
+
+    # Event Frequency Distribution & Total Variation Distance (TVD)
+    all_events = set(ev for seq in real_sequences for ev in seq) | set(ev for seq in generated_sequences for ev in seq)
+    real_total = sum(len(seq) for seq in real_sequences) or 1
+    gen_total = sum(len(seq) for seq in generated_sequences) or 1
+
+    real_dist = {ev: sum(seq.count(ev) for seq in real_sequences) / real_total for ev in all_events}
+    gen_dist = {ev: sum(seq.count(ev) for seq in generated_sequences) / gen_total for ev in all_events}
+
+    tvd = 0.5 * sum(abs(real_dist[ev] - gen_dist[ev]) for ev in all_events)
+    distribution_similarity = max(0.0, 1.0 - tvd)
+
+    # Sequence length comparison
+    real_lens = [len(s) for s in real_sequences]
+    gen_lens = [len(s) for s in generated_sequences]
+    len_diff = abs(np.mean(real_lens) - np.mean(gen_lens)) if real_lens and gen_lens else 0.0
+
+    # Overall similarity score: balanced composite of pattern F1, support fidelity, and distribution match
+    overall_similarity = float(
+        0.4 * f1 + 0.3 * max(0.0, 1.0 - mae_support * 2.0) + 0.3 * distribution_similarity
+    )
+
+    shared_top_patterns = sorted(
+        [
+            {
+                "pattern": sorted(list(k)),
+                "real_support": round(real_patterns[k], 4),
+                "gen_support": round(gen_patterns[k], 4),
+            }
+            for k in intersection if len(k) > 1
+        ],
+        key=lambda x: -x["real_support"]
+    )
+
+    return {
+        "metrics": {
+            "jaccard_similarity": round(jaccard, 4),
+            "pattern_recall": round(recall, 4),
+            "pattern_precision": round(precision, 4),
+            "f1_score": round(f1, 4),
+            "mean_absolute_support_error": round(mae_support, 4),
+            "support_correlation": round(support_correlation, 4),
+            "total_variation_distance": round(tvd, 4),
+            "distribution_similarity": round(distribution_similarity, 4),
+            "mean_length_difference": round(float(len_diff), 2),
+            "overall_similarity_score": round(overall_similarity, 4),
+        },
+        "counts": {
+            "real_patterns": len(real_keys),
+            "generated_patterns": len(gen_keys),
+            "shared_patterns": len(intersection),
+            "real_sequences": len(real_sequences),
+            "generated_sequences": len(generated_sequences),
+        },
+        "shared_patterns_sample": shared_top_patterns[:8],
+    }
+
+
+def milestone_4(
+    real_sequences: Optional[List[List[str]]] = None,
+    generated_sequences: Optional[List[List[str]]] = None,
+    min_support: float = 0.05,
+) -> Dict[str, Any]:
+    """Evaluate generated sequences against real patterns."""
+    if real_sequences is None:
+        real_sequences = milestone_1()
+    if generated_sequences is None:
+        m3_res = milestone_3(sequences=real_sequences, num_to_generate=len(real_sequences))
+        generated_sequences = m3_res["generated_sequences"]
+
+    return evaluate_sequence_similarity(
+        real_sequences=real_sequences,
+        generated_sequences=generated_sequences,
+        min_support=min_support,
+    )
 
 
 # --- Milestone 5: Implement a CLI to generate sequences based on a starting set of transactions.

@@ -107,9 +107,42 @@ def test_milestone_3():
 
 
 # Milestone 4: Evaluate the generated sequences for similarity to real patterns.
-@pytest.mark.skip(reason="remove this line when you start milestone 4")
 def test_milestone_4():
-    raise NotImplementedError("write the test for milestone 4")
+    from app.core import milestone_4, evaluate_sequence_similarity
+
+    # 1. Test identical sequences: similarity and jaccard should be 1.0, errors 0.0
+    identical = [
+        ["Salary_Direct_Deposit", "Rent_Mortgage_Payment"],
+        ["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Grocery_POS"],
+    ]
+    ident_res = evaluate_sequence_similarity(identical, identical, min_support=0.3)
+    assert ident_res["metrics"]["jaccard_similarity"] == 1.0
+    assert ident_res["metrics"]["pattern_recall"] == 1.0
+    assert ident_res["metrics"]["pattern_precision"] == 1.0
+    assert ident_res["metrics"]["f1_score"] == 1.0
+    assert ident_res["metrics"]["mean_absolute_support_error"] == 0.0
+    assert ident_res["metrics"]["total_variation_distance"] == 0.0
+    assert ident_res["metrics"]["overall_similarity_score"] == 1.0
+
+    # 2. Test disjoint sequences
+    disjoint_1 = [["Salary_Direct_Deposit", "Rent_Mortgage_Payment"]]
+    disjoint_2 = [["ATM_Cash_Withdrawal", "Pharmacy_Medical"]]
+    disj_res = evaluate_sequence_similarity(disjoint_1, disjoint_2, min_support=0.5)
+    assert disj_res["metrics"]["jaccard_similarity"] == 0.0
+    assert disj_res["counts"]["shared_patterns"] == 0
+
+    # 3. Test end-to-end milestone_4 evaluation
+    res = milestone_4(min_support=0.08)
+    assert "metrics" in res
+    assert "counts" in res
+    assert "shared_patterns_sample" in res
+    # Ensure metrics are properly calculated within valid probability bounds
+    for metric_name in ["jaccard_similarity", "pattern_recall", "pattern_precision", "f1_score", "overall_similarity_score"]:
+        val = res["metrics"][metric_name]
+        assert 0.0 <= val <= 1.0
+    # Plausible model should have shared frequent patterns
+    assert res["counts"]["shared_patterns"] > 0
+    assert res["metrics"]["overall_similarity_score"] > 0.4
 
 
 # Milestone 5: Implement a CLI to generate sequences based on a starting set of transactions.
