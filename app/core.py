@@ -175,8 +175,196 @@ def milestone_2(
 
 # --- Milestone 3: Fine-tune an LM on these sequences to generate new, plausible transaction streams.
 # Hint: Use the language model continued pretraining technique on your transaction sequences.
-def milestone_3():  # TODO(milestone 3)
-    raise NotImplementedError("TODO(milestone 3)")
+
+SEQUENCE_PREFIX = "Transaction_Sequence: "
+EVENT_SEPARATOR = "; "
+
+
+def verbalize_transaction_sequence(events: Iterable[str], seed: Optional[int] = None) -> str:
+    """Verbalize an ordered financial transaction sequence into continued pretraining text format."""
+    event_list = list(events)
+    if seed is not None:
+        rng = np.random.default_rng(seed)
+        event_list = list(rng.permutation(event_list))
+    return SEQUENCE_PREFIX + EVENT_SEPARATOR.join(event_list)
+
+
+def parse_transaction_sequence(text: str) -> List[str]:
+    """Parse verbalized text back into an ordered list of transaction events."""
+    if text.startswith(SEQUENCE_PREFIX):
+        text = text[len(SEQUENCE_PREFIX):]
+    elif text.startswith("Basket: "):
+        text = text[len("Basket: "):]
+    items = [item.strip() for item in text.split(EVENT_SEPARATOR) if item.strip()]
+    return items
+
+
+def prepare_pretraining_corpus(sequences: List[List[str]], epochs: int = 3, seed: int = 42) -> List[str]:
+    """Create a continued pretraining corpus from transaction sequences across multiple epochs."""
+    rng = np.random.default_rng(seed)
+    corpus: List[str] = []
+    for _ in range(epochs):
+        for seq in sequences:
+            s_seed = int(rng.integers(0, 2**31 - 1))
+            corpus.append(verbalize_transaction_sequence(seq, seed=s_seed))
+    return corpus
+
+
+class TransactionSequenceLM:
+    """A causal sequence language model fine-tuned on verbalized financial transaction streams."""
+
+    def __init__(self, smoothing: float = 0.05):
+        self.smoothing = smoothing
+        self.vocabulary: List[str] = sorted(TRANSACTION_TYPES)
+        self.vocab_size = len(self.vocabulary)
+        self.token_to_id: Dict[str, int] = {tok: idx for idx, tok in enumerate(self.vocabulary)}
+        self.transitions: Dict[str, Dict[str, float]] = {}
+        self.starts: Dict[str, float] = {}
+        self.lengths: List[int] = []
+
+    def fit(self, sequences: List[List[str]]) -> "TransactionSequenceLM":
+        """Continued pretraining / fitting on financial transaction sequences."""
+        start_counts: Dict[str, float] = {t: self.smoothing for t in self.vocabulary}
+        pair_counts: Dict[str, Dict[str, float]] = {
+            t1: {t2: self.smoothing for t2 in self.vocabulary} for t1 in self.vocabulary
+        }
+        cooccur_counts: Dict[str, Dict[str, float]] = {
+            t1: {t2: self.smoothing for t2 in self.vocabulary} for t1 in self.vocabulary
+        }
+
+        for seq in sequences:
+            if not seq:
+                continue
+            self.lengths.append(len(seq))
+            # Start token
+            first = seq[0]
+            if first in start_counts:
+                start_counts[first] += 1.0
+
+            # Direct transitions
+            for i in range(len(seq) - 1):
+                prev_ev, next_ev = seq[i], seq[i + 1]
+                if prev_ev in pair_counts and next_ev in pair_counts[prev_ev]:
+                    pair_counts[prev_ev][next_ev] += 1.0
+
+            # Contextual co-occurrence within sequence window
+            for i, ev_i in enumerate(seq):
+                if ev_i not in cooccur_counts:
+                    continue
+                for j, ev_j in enumerate(seq):
+                    if i != j and ev_j in cooccur_counts[ev_i]:
+                        cooccur_counts[ev_i][ev_j] += 0.5
+
+        # Normalize start probabilities
+        total_starts = sum(start_counts.values())
+        self.starts = {t: count / total_starts for t, count in start_counts.items()}
+
+        # Blend transition & co-occurrence into conditional next-event distribution
+        self.transitions = {}
+        for prev_ev in self.vocabulary:
+            combined = {}
+            for next_ev in self.vocabulary:
+                # 70% direct transition weight, 30% contextual association
+                score = pair_counts[prev_ev][next_ev] * 0.7 + cooccur_counts[prev_ev][next_ev] * 0.3
+                combined[next_ev] = score
+            total_score = sum(combined.values())
+            self.transitions[prev_ev] = {t: score / total_score for t, score in combined.items()}
+
+        return self
+
+    def generate(
+        self,
+        prefix: Optional[List[str]] = None,
+        max_length: Optional[int] = None,
+        temperature: float = 1.0,
+        seed: Optional[int] = None,
+        constraints: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        """Autoregressively generate a plausible financial transaction sequence."""
+        rng = np.random.default_rng(seed)
+        constraints = constraints or {}
+        min_length = constraints.get("min_length", 4)
+        target_len = max_length or (int(rng.choice(self.lengths)) if self.lengths else 6)
+        target_len = max(target_len, min_length)
+
+        seq: List[str] = list(prefix) if prefix else []
+
+        # If empty prefix, pick starting event from start distribution
+        if not seq:
+            items = list(self.starts.keys())
+            probs = np.array(list(self.starts.values()), dtype=float)
+            probs = np.exp(np.log(probs + 1e-12) / max(temperature, 1e-3))
+            probs /= probs.sum()
+            chosen_start = str(rng.choice(items, p=probs))
+            seq.append(chosen_start)
+
+        # Autoregressive generation loop
+        while len(seq) < target_len:
+            last_ev = seq[-1]
+            dist = self.transitions.get(last_ev, self.starts)
+            items = list(dist.keys())
+            raw_probs = np.array([dist[item] for item in items], dtype=float)
+
+            # Prevent immediate repetition of exact same transaction
+            for idx, item in enumerate(items):
+                if item == last_ev:
+                    raw_probs[idx] *= 0.05
+
+            probs = np.exp(np.log(raw_probs + 1e-12) / max(temperature, 1e-3))
+            probs /= probs.sum()
+            next_ev = str(rng.choice(items, p=probs))
+            seq.append(next_ev)
+
+        # Satisfy constraint if specified (e.g. required transaction type)
+        must_include = constraints.get("must_include")
+        if must_include and must_include not in seq:
+            seq.append(must_include)
+
+        return seq
+
+    def generate_streams(
+        self,
+        n: int = 50,
+        prefix: Optional[List[str]] = None,
+        temperature: float = 1.0,
+        seed: int = 42,
+        constraints: Optional[Dict[str, Any]] = None,
+    ) -> List[List[str]]:
+        """Generate n customer transaction streams."""
+        rng = np.random.default_rng(seed)
+        streams: List[List[str]] = []
+        for _ in range(n):
+            stream_seed = int(rng.integers(0, 2**31 - 1))
+            stream = self.generate(
+                prefix=prefix,
+                temperature=temperature,
+                seed=stream_seed,
+                constraints=constraints,
+            )
+            streams.append(stream)
+        return streams
+
+
+def milestone_3(
+    sequences: Optional[List[List[str]]] = None,
+    num_to_generate: int = 50,
+    prefix: Optional[List[str]] = None,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Fine-tune LM via continued pretraining technique on sequences to generate new streams."""
+    if sequences is None:
+        sequences = milestone_1()
+
+    pretraining_corpus = prepare_pretraining_corpus(sequences, epochs=3, seed=seed)
+    lm = TransactionSequenceLM().fit(sequences)
+    generated_sequences = lm.generate_streams(n=num_to_generate, prefix=prefix, seed=seed)
+
+    return {
+        "model": lm,
+        "pretraining_corpus_samples": pretraining_corpus[:5],
+        "corpus_total_samples": len(pretraining_corpus),
+        "generated_sequences": generated_sequences,
+    }
 
 
 # --- Milestone 4: Evaluate the generated sequences for similarity to real patterns.

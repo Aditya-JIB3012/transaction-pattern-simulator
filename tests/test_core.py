@@ -69,9 +69,41 @@ def test_milestone_2():
 
 
 # Milestone 3: Fine-tune an LM on these sequences to generate new, plausible transaction streams.
-@pytest.mark.skip(reason="remove this line when you start milestone 3")
 def test_milestone_3():
-    raise NotImplementedError("write the test for milestone 3")
+    from app.core import (
+        milestone_3,
+        verbalize_transaction_sequence,
+        parse_transaction_sequence,
+        prepare_pretraining_corpus,
+        TransactionSequenceLM,
+    )
+
+    # 1. Test verbalization and parsing roundtrip
+    events = ["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Utility_Bill_Payment"]
+    verbalized = verbalize_transaction_sequence(events)
+    assert verbalized.startswith("Transaction_Sequence: ")
+    assert parse_transaction_sequence(verbalized) == events
+
+    # 2. Test pretraining corpus preparation across epochs
+    sample_seqs = [events, ["Grocery_POS", "Restaurant_Dining"]]
+    corpus = prepare_pretraining_corpus(sample_seqs, epochs=2)
+    assert len(corpus) == 4
+
+    # 3. Test fine-tuning and generation with Milestone 3
+    result = milestone_3(num_to_generate=25, seed=123)
+    assert "model" in result
+    assert "generated_sequences" in result
+    generated = result["generated_sequences"]
+    assert len(generated) == 25
+    assert all(isinstance(seq, list) for seq in generated)
+    assert all(len(seq) >= 4 for seq in generated)
+
+    # 4. Test conditional prefix generation
+    prefix = ["ATM_Cash_Withdrawal", "Pharmacy_Medical"]
+    lm: TransactionSequenceLM = result["model"]
+    prefixed_seq = lm.generate(prefix=prefix, seed=99)
+    assert prefixed_seq[:2] == prefix
+    assert len(prefixed_seq) > len(prefix)
 
 
 # Milestone 4: Evaluate the generated sequences for similarity to real patterns.
