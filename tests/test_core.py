@@ -39,9 +39,33 @@ def test_milestone_1():
 
 
 # Milestone 2: Discover frequent transaction patterns using `thilimarketbasket`.
-@pytest.mark.skip(reason="remove this line when you start milestone 2")
 def test_milestone_2():
-    raise NotImplementedError("write the test for milestone 2")
+    from app.core import milestone_2, discover_transaction_patterns
+
+    # 1. Test mining on default transaction sequences
+    result = milestone_2(min_support=0.08, min_confidence=0.3)
+    assert isinstance(result, dict)
+    assert "patterns" in result
+    assert "rules" in result
+    assert "summary" in result
+    assert result["summary"]["total_sequences"] == 200
+    assert result["summary"]["num_patterns"] > 0
+    assert result["summary"]["num_rules"] > 0
+
+    # 2. Test mining on controlled sequences
+    controlled_sequences = [
+        ["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Utility_Bill_Payment"],
+        ["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Grocery_POS"],
+        ["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Utility_Bill_Payment"],
+        ["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Gas_Station_POS"],
+    ]
+    res = discover_transaction_patterns(controlled_sequences, min_support=0.5, min_confidence=0.5)
+    # Salary and Rent appear in all 4 (support 1.0)
+    assert frozenset(["Salary_Direct_Deposit", "Rent_Mortgage_Payment"]) in res["patterns"]
+    assert res["patterns"][frozenset(["Salary_Direct_Deposit", "Rent_Mortgage_Payment"])] == 1.0
+    # Utility appears in 2 out of 4 (support 0.5)
+    assert frozenset(["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Utility_Bill_Payment"]) in res["patterns"]
+    assert res["patterns"][frozenset(["Salary_Direct_Deposit", "Rent_Mortgage_Payment", "Utility_Bill_Payment"])] == 0.5
 
 
 # Milestone 3: Fine-tune an LM on these sequences to generate new, plausible transaction streams.

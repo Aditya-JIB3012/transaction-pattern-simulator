@@ -123,10 +123,54 @@ def milestone_1(transactions: Optional[Iterable[FinancialTransaction | Dict[str,
 
 
 
+from thilimarketbasket.mine import frequent_itemsets, rules
+
+
+def discover_transaction_patterns(
+    sequences: List[List[str]],
+    min_support: float = 0.05,
+    max_size: int = 4,
+    min_confidence: float = 0.3,
+) -> Dict[str, Any]:
+    """Discover frequent transaction itemsets and association rules using thilimarketbasket."""
+    patterns = frequent_itemsets(sequences, min_support=min_support, max_size=max_size)
+    assoc_rules = rules(patterns, min_confidence=min_confidence)
+    
+    top_patterns = sorted(
+        [{"pattern": sorted(list(k)), "support": round(v, 4), "size": len(k)} for k, v in patterns.items() if len(k) > 1],
+        key=lambda x: (-x["support"], -x["size"])
+    )
+    
+    return {
+        "patterns": patterns,
+        "rules": assoc_rules,
+        "summary": {
+            "total_sequences": len(sequences),
+            "num_patterns": len(patterns),
+            "num_multi_event_patterns": len(top_patterns),
+            "num_rules": len(assoc_rules),
+            "top_patterns": top_patterns[:10],
+        }
+    }
+
+
 # --- Milestone 2: Discover frequent transaction patterns using `thilimarketbasket`.
-# Hint: Apply the `lfretail-lfmarketbasket` technique to identify common transaction patterns.
-def milestone_2():  # TODO(milestone 2)
-    raise NotImplementedError("TODO(milestone 2)")
+# Hint: Apply the `thilimarketbasket` technique to identify common transaction patterns.
+def milestone_2(
+    sequences: Optional[List[List[str]]] = None,
+    min_support: float = 0.05,
+    max_size: int = 4,
+    min_confidence: float = 0.3,
+) -> Dict[str, Any]:
+    """Apply thilimarketbasket mining to identify frequent transaction patterns."""
+    if sequences is None:
+        sequences = milestone_1()
+    return discover_transaction_patterns(
+        sequences=sequences,
+        min_support=min_support,
+        max_size=max_size,
+        min_confidence=min_confidence,
+    )
 
 
 # --- Milestone 3: Fine-tune an LM on these sequences to generate new, plausible transaction streams.
