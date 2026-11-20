@@ -146,7 +146,49 @@ def test_milestone_4():
 
 
 # Milestone 5: Implement a CLI to generate sequences based on a starting set of transactions.
-@pytest.mark.skip(reason="remove this line when you start milestone 5")
-def test_milestone_5():
-    raise NotImplementedError("write the test for milestone 5")
+def test_milestone_5(tmp_path, capsys):
+    import json
+    from app.core import milestone_5
+    from app.cli import main
+
+    # 1. Test programmatic milestone_5 with prefix
+    prefix = ["Salary_Direct_Deposit", "Rent_Mortgage_Payment"]
+    seqs = milestone_5(prefix=prefix, num_sequences=3, min_length=4)
+    assert len(seqs) == 3
+    for s in seqs:
+        assert s[:2] == prefix
+        assert len(s) >= 4
+
+    # 2. Test stretch constraints: min_length and must_include
+    seqs_constrained = milestone_5(
+        prefix=["ATM_Cash_Withdrawal"],
+        num_sequences=2,
+        min_length=6,
+        must_include="Foreign_Online_Transaction",
+    )
+    for s in seqs_constrained:
+        assert len(s) >= 6
+        assert "Foreign_Online_Transaction" in s
+
+    # 3. Test saving to output file (Stretch Idea 3)
+    out_file = str(tmp_path / "saved_sequences.json")
+    seqs_saved = milestone_5(num_sequences=2, output_path=out_file)
+    with open(out_file, "r") as f:
+        loaded = json.load(f)
+    assert loaded == seqs_saved
+
+    # 4. Test CLI generate command with prefix, count, and constraints
+    main(["generate", "--prefix", "Salary_Direct_Deposit, Rent_Mortgage_Payment", "--count", "2", "--min-length", "4"])
+    out = capsys.readouterr().out
+    assert "Generated 2 sequence(s)" in out
+    assert "Salary_Direct_Deposit -> Rent_Mortgage_Payment" in out
+
+    # 5. Test CLI mine and evaluate commands
+    main(["mine", "--min-support", "0.1"])
+    out_mine = capsys.readouterr().out
+    assert "Frequent patterns found:" in out_mine
+
+    main(["evaluate", "--min-support", "0.1"])
+    out_eval = capsys.readouterr().out
+    assert "Overall Similarity Score:" in out_eval
 

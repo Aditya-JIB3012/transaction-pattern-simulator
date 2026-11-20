@@ -3,6 +3,7 @@
 """Core logic for Transaction Pattern Simulator. One stub per milestone; built step by step."""
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import numpy as np
 
@@ -485,5 +486,55 @@ def milestone_4(
 
 # --- Milestone 5: Implement a CLI to generate sequences based on a starting set of transactions.
 # Hint: Build a command-line interface that uses your fine-tuned LM to generate sequences.
-def milestone_5():  # TODO(milestone 5)
-    raise NotImplementedError("TODO(milestone 5)")
+
+_GLOBAL_LM: Optional[TransactionSequenceLM] = None
+
+
+def get_trained_lm(sequences: Optional[List[List[str]]] = None) -> TransactionSequenceLM:
+    """Return a trained sequence language model, caching it for fast reuse."""
+    global _GLOBAL_LM
+    if _GLOBAL_LM is None or sequences is not None:
+        if sequences is None:
+            sequences = milestone_1()
+        _GLOBAL_LM = TransactionSequenceLM().fit(sequences)
+    return _GLOBAL_LM
+
+
+def milestone_5(
+    prefix: Optional[List[str]] = None,
+    num_sequences: int = 1,
+    min_length: int = 4,
+    max_length: Optional[int] = None,
+    must_include: Optional[str] = None,
+    output_path: Optional[str] = None,
+    temperature: float = 1.0,
+    seed: Optional[int] = 42,
+) -> List[List[str]]:
+    """Generate plausible transaction sequences based on a starting set of transactions."""
+    lm = get_trained_lm()
+    constraints = {"min_length": min_length}
+    if must_include:
+        constraints["must_include"] = must_include
+
+    rng = np.random.default_rng(seed)
+    sequences: List[List[str]] = []
+    for _ in range(num_sequences):
+        s_seed = int(rng.integers(0, 2**31 - 1)) if seed is not None else None
+        seq = lm.generate(
+            prefix=prefix,
+            max_length=max_length,
+            temperature=temperature,
+            seed=s_seed,
+            constraints=constraints,
+        )
+        sequences.append(seq)
+
+    # Save to file if output_path is specified (Stretch Idea 3)
+    if output_path:
+        import json
+        out_file = Path(output_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(sequences, indent=2))
+
+    return sequences
+
